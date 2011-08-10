@@ -405,7 +405,7 @@ class MobileDevice:
     def get_manufacturer(self):
         return self._port.send_command('AT+CGMI')
 
-    def get_mmodel(self):
+    def get_model(self):
         return self._port.send_command('AT+CGMM')
 
     def get_imei(self):
@@ -521,7 +521,7 @@ class MobilePhone(MobileDevice):
     def get_phonebook(self):
         return self._get_phonebook()
 
-    def get_missing_calls(self):
+    def get_missed_calls(self):
         return self._get_phonebook('MC')
 
     def get_dialed_calls(self):
@@ -545,10 +545,10 @@ class MobilePhone(MobileDevice):
 
 
 if __name__ == '__main__':
-    terms = list_at_terminals() # lis available terminals :D
+    terms = list_at_terminals() # list available terminals :D
     print terms
     if len(terms)>0:
         mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
-        sms = mobile.create_sms('jejejejeje', 70927261) # we create a SMS
-        sms.send() # yeah babe! :D
+        #sms = mobile.create_sms('jejejejeje', 70927261) # we create a SMS
+        #sms.send() # yeah babe! :D
         print mobile.list_sms() # watch the sms's on the phone :D
