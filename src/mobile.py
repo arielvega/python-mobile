@@ -15,37 +15,24 @@ EOL = '\r\n'
 EOF = chr(26)
 RWSTORAGE = ['SM', 'ME', 'MT']
 
-def list_at_terminals():
+def list_at_terminals(findlist = ['USB']):
     ''' Function that lists all the AT terminals connected to the computer '''
-    step = -1
     atlist = []
-    while step < 255:
-        step = step + 1
-        try:
-            attc = ATTerminalConnection('/dev/ttyS'+str(step))
-            attc.set_timeout(0.01)
-            attc.open()
-            res = attc.send_command('AT')
-            if 'OK' in res:
-                attc.close()
-                atlist.append(attc)
-                attc.set_timeout(None)
-        except Exception, e:
-            pass
-    step = -1
-    while step < 255:
-        step = step + 1
-        try:
-            attc = ATTerminalConnection('/dev/ttyUSB'+str(step))
-            attc.set_timeout(0.01)
-            attc.open()
-            res = attc.send_command('AT')
-            if 'OK' in res:
-                attc.close()
-                atlist.append(attc)
-                attc.set_timeout(None)
-        except Exception, e:
-            pass
+    for interface in findlist:
+        step = -1
+        while step < 255:
+            step = step + 1
+            try:
+                attc = ATTerminalConnection('/dev/tty' + interface + str(step))
+                attc.set_timeout(0.01)
+                attc.open()
+                res = attc.send_command('AT')
+                if 'OK' in res:
+                    attc.close()
+                    atlist.append(attc)
+                    attc.set_timeout(None)
+            except Exception, e:
+                pass
     return atlist
 
 def _parse_txt_to_sms((txt, device)):
@@ -107,6 +94,7 @@ def _parse_txt_to_phonebook((txt, device)):
 
 
 class PhoneBook:
+    ''' Represents a phonebook '''
     def __init__(self, name, capacity, device):
         self.__name = name
         self.__capacity = int(capacity)
@@ -248,7 +236,7 @@ class SMS:
         self.__phone_number = phone
         self.__message = message
         self.__date = date
-        self.__position = int(pos) - 1
+        self.__position = int(pos)
         self.__memory = memory
         self.__device = device
 
@@ -295,8 +283,11 @@ class SMS:
         self.__memory = memory
 
     def __str__(self):
-        res = 'Phone: '+ self.__phone_number +'\nMsg: '+ self.__message + '\nDate: '+self.__date+'\nMemory: '+self.__memory +'\nPosition: '+self.__position+'\n:::'
+        res = 'Phone: '+ str(self.__phone_number) +'\nMsg: '+ self.__message + '\nDate: '+ self.__date + '\nMemory: ' + self.__memory + '\nPosition: '+ str(self.__position) + '\n:::'
         return res
+
+    def __repr__(self):
+        return str(self)
 
 
 
@@ -327,15 +318,20 @@ class ATTerminalConnection:
         res = ''
         a = time.time()
         b = time.time()
-        while (not self.__port.inWaiting()) and ((self.__timeout == None) or ((b-a) < self.__timeout )):
-            b = time.time()
-            pass
-        while self.__port.inWaiting():
+        while self.__port.inWaiting() or not self.__is_valid_response(res):
             buff = self.__port.readline()
             if not buff.startswith('^'):
                 res = res + buff
+            if (self.__timeout == None) or ( (b-a) < self.__timeout ):
+                b = time.time()
+                time.sleep(0.0001)
+            else:
+                break
         self.__port.flushInput()
         return res
+
+    def __is_valid_response(self, response):
+        return ('OK' in response) or ('ERROR' in response) or ('COMMAND NOT SUPPORT' in response)
 
     def clear_buffer(self):
         if self.__port == None:
@@ -364,9 +360,27 @@ class ATTerminalConnection:
 
     def set_timeout(self, timeout):
         self.__timeout = timeout
+        if self.__port <> None:
+            self.__port.setTimeout(timeout)
+
+    def get_timeout(self):
+        return self.__timeout
 
     def is_open(self):
         return self.__is_open
+
+    def exist_command(self, command, timeout = None):
+        to = self.__timeout
+        self.set_timeout(timeout)
+        if not self.is_open():
+            self.open()
+            self.send_command(command, False)
+            res = self.read_buffer()
+            self.close()
+        else:
+            res = self.send_command(command)
+        self.set_timeout(to)
+        return '\r\nOK\r\n' in res
 
     def __str__(self):
         return self.__port_name
@@ -385,6 +399,8 @@ class MobileDevice:
     def _prepare(self):
         self._port.send_command('ATE0')
         self._port.send_command('AT+CMGF=1')
+        self._port.send_command('AT+CPMS="ME","ME","ME"')
+        self._port.send_command('AT+COPS=0,0')
 
     def get_manufacturer(self):
         return self._port.send_command('AT+CGMI')
@@ -409,8 +425,9 @@ class MobileDevice:
         self._port.set_timeout(None)
         self._port.send_command('AT+CMGS="'+str(phone)+'"', False)
         self._port.send_command(message,False)
-        self._port.send_direct_command(EOF)
-        self._port.clear_buffer()
+        self._port.send_direct_command(EOF)        
+        #self._port.clear_buffer()
+        print self._port.read_buffer()
         self._port.set_timeout(to)
 
     def _list_sms(self, memory = 'ALL'):
@@ -436,7 +453,15 @@ class MobileDevice:
         self._prepare()
         if isinstance(sms, SMS):
             sms = sms.get_position()
-        print self._port.send_command('AT+CMGD='+sms)
+        print self._port.send_command('AT+CMGD='+str(sms))
+
+    def get_operator(self):
+        self._prepare()
+        res = self._port.send_command('AT+COPS?').split(',')
+        return res[-2].replace('"','')
+
+    def get_signal_strenght(self):
+        pass
 
 
 
@@ -445,7 +470,7 @@ class MobilePhone(MobileDevice):
 
     def __init__(self, atport):
         MobileDevice.__init__(self, atport)
-        self._port.set_timeout(0.1)
+        self._port.set_timeout(0.5)
 
     def _get_storage(self, storage = None):
         self._prepare()
@@ -520,7 +545,10 @@ class MobilePhone(MobileDevice):
 
 
 if __name__ == '__main__':
-    mobile = MobilePhone(ATTerminalConnection('/dev/ttyUSB1'))
-    print mobile.get_dialed_calls()
-    print mobile.get_missing_calls()
-    print mobile.get_received_calls()
+    terms = list_at_terminals() # lis available terminals :D
+    print terms
+    if len(terms)>0:
+        mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
+        sms = mobile.create_sms('SALDO', 2255) # we create a SMS
+        sms.send() # yeah babe! :D
+        print mobile.list_sms() # watch the sms's on the phone :D
