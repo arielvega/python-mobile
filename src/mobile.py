@@ -14,25 +14,37 @@ __ALL__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'ATTerminalConnection', 'Mobile
 EOL = '\r\n'
 EOF = chr(26)
 RWSTORAGE = ['SM', 'ME', 'MT']
+KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
+''' # Serial device to which the mobile device may be connected:
+/dev/ttyS*    for serial port, 
+/dev/ircomm*  for IrDA,
+/dev/ttyUB*   for Bluetooth (Bluez with rfcomm running),
+/dev/ttyUSB*  for USB,
+/dev/rfcomm*  Bluetooth serial port and
+/dev/ttyACM*  for USB ACM 
 
-def list_at_terminals(findlist = ['USB']):
+from: http://www.lugmen.org.ar/pipermail/lug-list/2005-April/035245.html
+'''
+
+def list_at_terminals(findlist = ['ttyUSB']):
     ''' Function that lists all the AT terminals connected to the computer '''
     atlist = []
     for interface in findlist:
-        step = -1
-        while step < 255:
-            step = step + 1
-            try:
-                attc = ATTerminalConnection('/dev/tty' + interface + str(step))
-                attc.set_timeout(0.01)
-                attc.open()
-                res = attc.send_command('AT')
-                if 'OK' in res:
-                    attc.close()
-                    atlist.append(attc)
-                    attc.set_timeout(None)
-            except Exception, e:
-                pass
+        if interface in KNOWNSERIALPORTS:
+            step = -1
+            while step < 255:
+                step = step + 1
+                try:
+                    attc = ATTerminalConnection('/dev/' + interface + str(step))
+                    attc.set_timeout(0.01)
+                    attc.open()
+                    res = attc.send_command('AT')
+                    if 'OK' in res:
+                        attc.close()
+                        atlist.append(attc)
+                        attc.set_timeout(None)
+                except Exception, e:
+                    pass
     return atlist
 
 def _parse_txt_to_sms((txt, device)):
