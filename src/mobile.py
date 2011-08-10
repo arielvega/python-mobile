@@ -99,22 +99,22 @@ def _parse_txt_to_phonebook((txt, device)):
     txt = txt[0].strip().split(',')
     while(txt.count('')>0):
         txt.remove('')
-    name = txt[0].replace('"','')
+    location = txt[0].replace('"','')
     capacity = txt[2].replace('"','')
-    return PhoneBook(name, capacity, device)
+    return PhoneBook(location, capacity, device)
 
 
 
 class PhoneBook:
     ''' Represents a phonebook '''
-    def __init__(self, name, capacity, device):
-        self.__name = name
+    def __init__(self, location, capacity, device):
+        self.__location = location
         self.__capacity = int(capacity)
         self.__device = device
         self.__entries = []
 
-    def get_name(self):
-        return self.__name
+    def get_location(self):
+        return self.__location
 
     def get_used(self):
         res = 0
@@ -159,7 +159,7 @@ class PhoneBook:
         pass
 
     def save_entry(self, entry):
-        self.__device._save_phonebook_entry(self.__name, entry)
+        self.__device._save_phonebook_entry(self.__location, entry)
 
     def load(self):
         if len(self.__entries) == 0:
@@ -167,13 +167,13 @@ class PhoneBook:
             while i < self.__capacity:
                 self.__entries.append(None)
                 i = i + 1
-        entries = self.__device._get_phonebook_entries(self.__name)
+        entries = self.__device._get_phonebook_entries(self.__location)
         for entry in entries:
             if entry <> None:
                 self.__entries[entry.get_position()] = entry
 
     def __str__(self):
-        return 'Storage: ' + self.__name + '\nMax: ' + str(self.__capacity) + '\nUsed: ' + str(self.get_used()) + '\nEntries:\n' + '\n'.join([str(i) for i in self.__entries])
+        return 'Storage: ' + self.__location + '\nMax: ' + str(self.__capacity) + '\nUsed: ' + str(self.get_used()) + '\nEntries:\n' + '\n'.join([str(i) for i in self.__entries])
 
     def __repr__(self):
         return str(self)
@@ -182,7 +182,7 @@ class PhoneBook:
 
 class PhoneBookEntry:
     ''' It represents a entry on the phonebook '''
-    def __init__(self, name, phone, pos = -1, atype = 161, phonebook = None):
+    def __init__(self, name, phone, pos = -1, atype = 129, phonebook = None):
         self.__name = name
         self.__phone_number = phone
         self.__position = int(pos) - 1
@@ -496,7 +496,7 @@ class MobilePhone(MobileDevice):
             res.remove('\r\n')
         res = _parse_txt_to_phonebook((res[0], self))
         if oldstorage <> None:
-            self._port.send_command('AT+CPBS="'+ oldstorage.get_name() +'" ')
+            self._port.send_command('AT+CPBS="'+ oldstorage.get_location() +'" ')
         return res
 
     def _get_phonebook(self, storage = None):
@@ -508,7 +508,7 @@ class MobilePhone(MobileDevice):
         res = self._get_storage()
         res.add_entries(self._get_phonebook_entries())
         if oldstorage <> None:
-            self._port.send_command('AT+CPBS="'+ oldstorage.get_name() +'" ')
+            self._port.send_command('AT+CPBS="'+ oldstorage.get_location() +'" ')
         return res
 
     def _get_phonebook_entries(self, storage = None):
@@ -518,7 +518,7 @@ class MobilePhone(MobileDevice):
         oldstorage = None
         if storage <> None:
             oldstorage = self._get_storage()
-            self._port.send_command('AT+CPBS="'+ storage.get_name() +'" ')
+            self._port.send_command('AT+CPBS="'+ storage.get_location() +'" ')
         else:
             storage = self._get_storage()
         res = self._port.send_command('AT+CPBR=1,' + str(storage.get_capacity()) )
@@ -527,7 +527,7 @@ class MobilePhone(MobileDevice):
             res.remove('\r\n')
         res = map(_parse_txt_to_phonebook_entry, [(x,y) for x in res for y in [self._get_storage()]])
         if oldstorage <> None:
-            self._port.send_command('AT+CPBS="'+ oldstorage.get_name() +'" ')
+            self._port.send_command('AT+CPBS="'+ oldstorage.get_location() +'" ')
         return res
 
     def get_phonebook(self):
@@ -548,7 +548,7 @@ class MobilePhone(MobileDevice):
             return
         self._port.send_command('AT+CPBS="'+storage+'"')
         self._port.send_command('AT+CPBW='+str(entry.get_position())+','+entry.get_phone_number(),','+str(entry.get_type())+',"'+entry.get_name()+'"')
-        self._port.send_command('AT+CPBS="'+oldstorage.get_name()+'"')
+        self._port.send_command('AT+CPBS="'+oldstorage.get_location()+'"')
 
     def call(self, phone):
         self._prepare()
