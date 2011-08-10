@@ -549,6 +549,6 @@ if __name__ == '__main__':
     print terms
     if len(terms)>0:
         mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
-        sms = mobile.create_sms('SALDO', 2255) # we create a SMS
+        sms = mobile.create_sms('jejejejeje', 70927261) # we create a SMS
         sms.send() # yeah babe! :D
         print mobile.list_sms() # watch the sms's on the phone :D
