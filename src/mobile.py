@@ -9,7 +9,7 @@ Created on 04/08/2011
 import serial, time, datetime
 
 
-__ALL__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'ATTerminalConnection', 'MobileDevice', 'MobilePhone']
+__all__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'ATTerminalConnection', 'MobileDevice', 'MobilePhone']
 
 EOL = '\r\n'
 EOF = chr(26)
@@ -43,7 +43,7 @@ def list_at_terminals(findlist = ['ttyUSB']):
                         attc.close()
                         atlist.append(attc)
                         attc.set_timeout(None)
-                except Exception, e:
+                except:
                     pass
     return atlist
 
@@ -561,6 +561,6 @@ if __name__ == '__main__':
     print terms
     if len(terms)>0:
         mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
-        #sms = mobile.create_sms('jejejejeje', 70927261) # we create a SMS
+        #sms = mobile.create_sms('saldo', 2255) # we create a SMS
         #sms.send() # yeah babe! :D
         print mobile.list_sms() # watch the sms's on the phone :D
