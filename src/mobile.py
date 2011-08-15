@@ -64,7 +64,10 @@ def _parse_txt_to_sms((txt, device)):
     pos = txt[0].replace('"','')
     memory = txt[1].replace('"','')
     phone = txt[2].replace('"','')
-    date = (txt[3] +', '+ txt[4]).replace('"','')
+    if(len(txt)>3):
+        date = (txt[3] +', '+ txt[4]).replace('"','')
+    else:
+        date=''
     return SMS(message, phone, date, pos, memory, device)
 
 def _parse_txt_to_phonebook_entry((txt, memory)):
@@ -112,16 +115,13 @@ class PhoneBook:
         self.__capacity = int(capacity)
         self.__device = device
         self.__entries = []
+        self.__used = 0
 
     def get_location(self):
         return self.__location
 
     def get_used(self):
-        res = 0
-        for e in self.__entries:
-            if e <> None:
-                res = res + 1
-        return res
+        return self.__used
 
     def get_capacity(self):
         return self.__capacity
@@ -137,17 +137,18 @@ class PhoneBook:
         if len(self.__entries) == 0:
             self.load()
         if isinstance(entry, PhoneBookEntry):
-            if self.__entries[entry.get_position()] <> None :
-                if self.__entries[entry.get_position()] <> entry :
+            if self.__entries[entry.get_position() - 1] <> None :
+                if self.__entries[entry.get_position() - 1] <> entry :
                     entry.set_position(self.get_free_position())
                 else:
                     return
-            self.__entries[entry.get_position()] = entry
+            self.__entries[entry.get_position() - 1] = entry
+            self.__used = self.__used + 1
 
     def get_free_position(self):
         i = 0
         while i < self.__capacity:
-            if self.__entries[i] <> None:
+            if self.__entries[i] == None:
                 return i + 1
             i = i + 1
         return None
@@ -156,6 +157,7 @@ class PhoneBook:
         return PhoneBookEntry(name, phone, self.get_free_position(), phonebook = self)
 
     def delete_entry(self, entry):
+        self.__used = self.__used - 1
         pass
 
     def save_entry(self, entry):
@@ -170,7 +172,8 @@ class PhoneBook:
         entries = self.__device._get_phonebook_entries(self.__location)
         for entry in entries:
             if entry <> None:
-                self.__entries[entry.get_position()] = entry
+                self.__entries[entry.get_position() - 1] = entry
+                self.__used = self.__used + 1
 
     def __str__(self):
         return 'Storage: ' + self.__location + '\nMax: ' + str(self.__capacity) + '\nUsed: ' + str(self.get_used()) + '\nEntries:\n' + '\n'.join([str(i) for i in self.__entries])
@@ -178,6 +181,10 @@ class PhoneBook:
     def __repr__(self):
         return str(self)
 
+    def __iter__(self):
+        for e in self.__entries:
+            if e <> None:
+                yield e
 
 
 class PhoneBookEntry:
@@ -185,7 +192,7 @@ class PhoneBookEntry:
     def __init__(self, name, phone, pos = -1, atype = 129, phonebook = None):
         self.__name = name
         self.__phone_number = phone
-        self.__position = int(pos) - 1
+        self.__position = int(pos)
         self.__type = atype
         self.__phonebook = phonebook
 
@@ -460,6 +467,12 @@ class MobileDevice:
 
     def list_old_sms(self):
         return self._list_sms('REC READ')
+
+    def list_unsended_sms(self):
+        return self._list_sms('STO UNSENT')
+
+    def list_sended_sms(self):
+        return self._list_sms('STO SENT')
 
     def delete_sms(self, sms):
         self._prepare()
