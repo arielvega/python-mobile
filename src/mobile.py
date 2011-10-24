@@ -6,7 +6,7 @@ Created on 04/08/2011
 
 '''
 
-import serial, time, datetime
+import serial, time, datetime, re
 
 
 __all__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'ATTerminalConnection', 'MobileDevice', 'MobilePhone']
@@ -15,7 +15,8 @@ EOL = '\r\n'
 EOF = chr(26)
 RWSTORAGE = ['SM', 'ME', 'MT']
 KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
-''' # Serial device to which the mobile device may be connected:
+''' 
+# Serial device to which the mobile device may be connected:
 /dev/ttyS*    for serial port, 
 /dev/ircomm*  for IrDA,
 /dev/ttyUB*   for Bluetooth (Bluez with rfcomm running),
@@ -26,6 +27,30 @@ KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
 from: http://www.lugmen.org.ar/pipermail/lug-list/2005-April/035245.html
 '''
 
+ascii = re.compile('[a-zA-Z \r\n\t&\\\+\-\_\:\;\=\.\*\%!|@?\<\>\(\)0-9/\'\"\[\]\{\}\$]+',re.IGNORECASE)
+
+SMS_ASCII_LENGHT = 140
+SMS_NON_ASCII_LENGHT = 70
+
+def get_sms_lenght(text):
+    if ascii.match(text):
+        return SMS_ASCII_LENGHT
+    return SMS_NON_ASCII_LENGHT
+
+def split_sms_text(text):
+    lenght = get_sms_lenght(text)
+    l = []
+    while len(text)>0:
+        l.append(text[:lenght])
+        text = text[lenght:]
+    return l
+
+def get_os_port(port):
+    if port.startswith('/dev/'):
+        return port
+    else:
+        return '/dev/' + port
+
 def list_at_terminals(findlist = ['ttyUSB']):
     ''' Function that lists all the AT terminals connected to the computer '''
     atlist = []
@@ -35,15 +60,15 @@ def list_at_terminals(findlist = ['ttyUSB']):
             while step < 255:
                 step = step + 1
                 try:
-                    attc = ATTerminalConnection('/dev/' + interface + str(step))
-                    attc.set_timeout(0.01)
+                    attc = ATTerminalConnection(interface + str(step))
                     attc.open()
+                    attc.set_timeout(0.01)
                     res = attc.send_command('AT')
                     if 'OK' in res:
                         attc.close()
                         atlist.append(attc)
                         attc.set_timeout(None)
-                except:
+                except Exception, detail:
                     pass
     return atlist
 
@@ -55,20 +80,26 @@ def _parse_txt_to_sms((txt, device)):
         txt.remove('OK')
     while(txt.count('')>0):
         txt.remove('')
-    if(len(txt) <> 2):
+    if(len(txt) < 2):
         return
-    message = txt[-1]
-    txt = txt[0].strip().split(',')
-    while(txt.count('')>0):
-        txt.remove('')
-    pos = txt[0].replace('"','')
-    memory = txt[1].replace('"','')
-    phone = txt[2].replace('"','')
-    if(len(txt)>3):
-        date = (txt[3] +', '+ txt[4]).replace('"','')
-    else:
-        date=''
-    return SMS(message, phone, date, pos, memory, device)
+    try:
+        if(len(txt) == 2):
+            message = txt[-1]
+        else:
+            message = '\n'.join(txt[1:])
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        pos = txt[0].replace('"','')
+        memory = txt[1].replace('"','')
+        phone = txt[2].replace('"','')
+        if(len(txt)>3):
+            date = (txt[3] +', '+ txt[4]).replace('"','')
+        else:
+            date=''
+        return SMS(message, phone, date, pos, memory, device)
+    except:
+        return
 
 def _parse_txt_to_phonebook_entry((txt, memory)):
     txt = txt.strip().split('\r\n')
@@ -80,31 +111,37 @@ def _parse_txt_to_phonebook_entry((txt, memory)):
         txt.remove('')
     if(len(txt) == 0):
         return
-    txt = txt[0].strip().split(',')
-    while(txt.count('')>0):
-        txt.remove('')
-    pos = txt[0].replace('"','')
-    phone = txt[1].replace('"','')
-    type = txt[2].replace('"','')
-    name = txt[3].replace('"','')
-    return PhoneBookEntry(name, phone, pos, type, memory)
+    try:
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        pos = txt[0].replace('"','')
+        phone = txt[1].replace('"','')
+        type = txt[2].replace('"','')
+        name = txt[3].replace('"','')
+        return PhoneBookEntry(name, phone, pos, type, memory)
+    except:
+        return
 
 def _parse_txt_to_phonebook((txt, device)):
     txt = txt.strip().split('\r\n')
     if (txt.count('ERROR')>0):
-        return
+        return PhoneBook('VOLATILE', 10, device)
     while(txt.count('OK')>0):
         txt.remove('OK')
     while(txt.count('')>0):
         txt.remove('')
     if(len(txt) == 0):
-        return
-    txt = txt[0].strip().split(',')
-    while(txt.count('')>0):
-        txt.remove('')
-    location = txt[0].replace('"','')
-    capacity = txt[2].replace('"','')
-    return PhoneBook(location, capacity, device)
+        return PhoneBook('VOLATILE', 10, device)
+    try:
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        location = txt[0].replace('"','')
+        capacity = txt[2].replace('"','')
+        return PhoneBook(location, capacity, device)
+    except:
+        return PhoneBook('VOLATILE', 10, device)
 
 
 
@@ -142,6 +179,8 @@ class PhoneBook:
                     entry.set_position(self.get_free_position())
                 else:
                     return
+            if self.__entries.count(entry)>0:
+                return
             self.__entries[entry.get_position() - 1] = entry
             self.__used = self.__used + 1
 
@@ -157,6 +196,7 @@ class PhoneBook:
         return PhoneBookEntry(name, phone, self.get_free_position(), phonebook = self)
 
     def delete_entry(self, entry):
+        self.__device._delete_phonebook_entry(self.__location, entry)
         self.__used = self.__used - 1
         pass
 
@@ -227,7 +267,7 @@ class PhoneBookEntry:
         self.__phonebook = phonebook
 
     def delete(self):
-        pass
+        self.__phonebook.delete_entry(self)
 
     def save(self):
         self.__phonebook.save_entry(self)
@@ -240,12 +280,40 @@ class PhoneBookEntry:
 
     def __eq__(self, other):
         try:
-            return self.__name == other.get_name() and self.__phone_number == other.get_phone_number() and self.__position == other.get_position() and self.__type == other.get_type()
+            return self.__name == other.get_name() and self.__phone_number == other.get_phone_number() and self.__type == other.get_type()
         except:
             return False
 
     def __neq__(self, other):
         return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if other == None:
+            return False
+        return self.get_name() < other.get_name()
+
+    def __le__(self, other):
+        if other == None:
+            return False
+        return self.get_name() <= other.get_name()
+
+    def __gt__(self, other):
+        if other == None:
+            return False
+        return self.get_name() > other.get_name()
+
+    def __ge__(self, other):
+        if other == None:
+            return False
+        return self.get_name() >= other.get_name()
+
+    def __cmp__(self, other):
+        if other == None:
+            return False
+        return cmp(self.get_name(), other.get_name())
+
+    def __hash(self):
+        return hash(self.get_name())
 
 
 
@@ -263,8 +331,8 @@ class SMS:
         if (self.__device == None) or (self.get_memory() == 'REC READ'):
             print 'no se puede enviar el mensaje'
             print self
-            return
-        self.__device.send_sms(self)
+            return False
+        return self.__device.send_sms(self)
 
     def delete(self):
         if self.__device == None:
@@ -302,18 +370,55 @@ class SMS:
         self.__memory = memory
 
     def __str__(self):
-        res = 'Phone: '+ str(self.__phone_number) +'\nMsg: '+ self.__message + '\nDate: '+ self.__date + '\nMemory: ' + self.__memory + '\nPosition: '+ str(self.__position) + '\n:::'
-        return res
+        res = str(self.__phone_number) +' -> '+ self.__message# + 'Date: '+ self.__date
+        return res[:20]+'...'
 
     def __repr__(self):
         return str(self)
 
+    def __lt__(self, other):
+        if other == None:
+            return False
+        return self.get_date() > other.get_date()
+
+    def __le__(self, other):
+        if other == None:
+            return False
+        return self.get_date() >= other.get_date()
+
+    def __eq__(self, other):
+        if other == None:
+            return False
+        return self.get_date() == other.get_date()
+
+    def __ne__(self, other):
+        if other == None:
+            return False
+        return self.get_date() <> other.get_date()
+
+    def __gt__(self, other):
+        if other == None:
+            return False
+        return self.get_date() < other.get_date()
+
+    def __ge__(self, other):
+        if other == None:
+            return False
+        return self.get_date() <= other.get_date()
+
+    def __cmp__(self, other):
+        if other == None:
+            return False
+        return cmp(self.get_date(), other.get_date())
+
+    def __hash(self):
+        return hash(self.get_date())
 
 
 class ATTerminalConnection:
     ''' Represents a terminal who process AT commands '''
     def __init__(self, port = '/dev/ttyUSB0'):
-        self.__port_name = port
+        self.__port_name = get_os_port(port)
         self.__is_open = False
         self.__port = None
         self.__timeout = None
@@ -343,7 +448,7 @@ class ATTerminalConnection:
                 res = res + buff
             if (self.__timeout == None) or ( (b-a) < self.__timeout ):
                 b = time.time()
-                time.sleep(0.0001)
+                time.sleep(0.00001)
             else:
                 break
         self.__port.flushInput()
@@ -414,12 +519,16 @@ class MobileDevice:
     def __init__(self, atport):
         self._port = atport
         self._port.open()
+        self._port.send_command('AT+CFUN=1')
+        self._prepare()
 
     def _prepare(self):
         self._port.send_command('ATE0')
         self._port.send_command('AT+CMGF=1')
-        self._port.send_command('AT+CPMS="ME","ME","ME"')
+#        self._port.send_command('AT+CPMS="ME","ME","ME"')
+        self._port.send_command('AT+CPMS="MT","MT","MT"')
         self._port.send_command('AT+COPS=0,0')
+        #self._port.read_buffer()
 
     def get_manufacturer(self):
         return self._port.send_command('AT+CGMI')
@@ -436,20 +545,26 @@ class MobileDevice:
     def send_sms(self, message, phone = None):
         self._prepare()
         if isinstance(message, str) and phone == None:
-            return
+            return False
         if isinstance(message, SMS):
             phone = message.get_phone_number()
             message = message.get_message()
         to = self._port.get_timeout()
         self._port.set_timeout(None)
-        self._port.send_command('AT+CMGS="'+str(phone)+'"', False)
-        self._port.send_command(message,False)
-        self._port.send_direct_command(EOF)        
-        #self._port.clear_buffer()
-        print self._port.read_buffer()
+        message = split_sms_text(message)
+        res = True
+        for text in message:
+            self._port.send_command('AT+CMGS="'+str(phone)+'"', False)
+            self._port.send_command(text, False)
+            self._port.send_direct_command(EOF)        
+            #self._port.clear_buffer()
+            out = self._port.read_buffer()
+            print out
+            res = res and (out.count('OK') > 0) 
         self._port.set_timeout(to)
+        return res
 
-    def _list_sms(self, memory = 'ALL'):
+    def _list_sms(self,phone , memory = 'ALL'):
         self._prepare()
         self._port.clear_buffer()
         res = self._port.send_command('AT+CMGL="'+memory+'"')
@@ -457,22 +572,27 @@ class MobileDevice:
         while(res.count('\r\n')>0):
             res.remove('\r\n')
         res = map(_parse_txt_to_sms, [(x,y) for x in res for y in [self]])
+        while res.count(None) > 0:
+            res.remove(None)
+        if phone <> None:
+            res = [sms for sms in res if sms.get_phone_number() == phone]
+        res.sort()
         return res
 
-    def list_sms(self):
-        return self._list_sms()
+    def list_sms(self, phone = None):
+        return self._list_sms(phone)
 
-    def list_new_sms(self):
-        return self._list_sms('REC UNREAD')
+    def list_new_sms(self, phone = None):
+        return self._list_sms(phone, 'REC UNREAD')
 
-    def list_old_sms(self):
-        return self._list_sms('REC READ')
+    def list_old_sms(self, phone = None):
+        return self._list_sms(phone, 'REC READ')
 
-    def list_unsended_sms(self):
-        return self._list_sms('STO UNSENT')
+    def list_unsended_sms(self, phone = None):
+        return self._list_sms(phone, 'STO UNSENT')
 
-    def list_sended_sms(self):
-        return self._list_sms('STO SENT')
+    def list_sended_sms(self, phone = None):
+        return self._list_sms(phone, 'STO SENT')
 
     def delete_sms(self, sms):
         self._prepare()
@@ -482,13 +602,40 @@ class MobileDevice:
 
     def get_operator(self):
         self._prepare()
+        self._port.send_command('AT+COPS=0,1')
         res = self._port.send_command('AT+COPS?').split(',')
         return res[-2].replace('"','')
+
+    def get_mobile_network_code(self):
+        self._prepare()
+        self._port.send_command('AT+COPS=0,2')
+        res = self._port.send_command('AT+COPS?').split(',')
+        return res[-2].replace('"','')
+
+    def get_network_code(self):
+        self._prepare()
+        self._port.send_command('AT+COPS=0,2')
+        res = self._port.send_command('AT+COPS?').split(',')
+        return res[-2].replace('"','')[3:]
+
+    def get_country_code(self):
+        self._prepare()
+        self._port.send_command('AT+COPS=0,2')
+        res = self._port.send_command('AT+COPS?').split(',')
+        print res
+        return res[-2].replace('"','')[:3]
 
     def get_signal_strenght(self):
         pass
 
+    def power_on(self):
+        self._port.open()
 
+    def power_off(self):
+        self._port.close()
+
+    def exec_command(self, cmd):
+        return self._port.send_command('AT' + cmd)
 
 class MobilePhone(MobileDevice):
     ''' Represents a mobile phone, it has methods for make and response a call '''
@@ -563,9 +710,21 @@ class MobilePhone(MobileDevice):
         self._port.send_command('AT+CPBW='+str(entry.get_position())+','+entry.get_phone_number(),','+str(entry.get_type())+',"'+entry.get_name()+'"')
         self._port.send_command('AT+CPBS="'+oldstorage.get_location()+'"')
 
+    def _delete_phonebook_entry(self, storage, entry):
+        oldstorage = self._get_storage()
+        if storage not in RWSTORAGE:
+            return
+        self._port.send_command('AT+CPBS="'+storage+'"')
+        self._port.send_command('AT+CPBW='+str(entry.get_position()))
+        self._port.send_command('AT+CPBS="'+oldstorage.get_location()+'"')
+
     def call(self, phone):
         self._prepare()
-        return self._port.send_command('ATD'+phone)
+        to = self._port.get_timeout()
+        self._port.set_timeout(7)
+        res = self._port.send_command('ATD'+phone)
+        self._port.set_timeout(to)
+        return res.count('OK')>0 or res.count('NO CARRIER')>0
 
 
 
@@ -575,5 +734,22 @@ if __name__ == '__main__':
     if len(terms)>0:
         mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
         #sms = mobile.create_sms('saldo', 2255) # we create a SMS
+        #sms = mobile.create_sms('4040901570989', 171) # cargamos al chip
+        #sms = mobile.create_sms('hora', 4646) # habilitamos internet
         #sms.send() # yeah babe! :D
-        print mobile.list_sms() # watch the sms's on the phone :D
+        #l =  mobile.list_sms('2255')
+        l =  mobile.list_new_sms('2255')
+        print l
+        #for msg in l:
+        #    msg.delete()
+        #print mobile.get_model()
+        #print mobile.get_country_code()
+        #print mobile.get_network_code()
+        #print mobile.list_sms() # watch the sms's on the phone :D
+        #mobile._prepare()
+        #print mobile.call('70927261')
+        #print mobile.exec_command('+CPMS="SM","SM","SM"')
+        #print mobile.exec_command('+CMGL="REC READ"')
+        #print mobile.exec_command('+CLAC') OBTIENE LA LISTA DE COMANDOS AT SOPORTADOS POR EL TELEFONO
+        #print mobile.exec_command('+COPS=0,0')
+        #print mobile.exec_command('+COPS?')
