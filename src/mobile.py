@@ -738,8 +738,8 @@ if __name__ == '__main__':
         #sms = mobile.create_sms('hora', 4646) # habilitamos internet
         #sms.send() # yeah babe! :D
         #l =  mobile.list_sms('2255')
-        l =  mobile.list_new_sms('2255')
-        print l
+        #l =  mobile.list_new_sms('2255')
+        #print l
         #for msg in l:
         #    msg.delete()
         #print mobile.get_model()
@@ -752,4 +752,4 @@ if __name__ == '__main__':
         #print mobile.exec_command('+CMGL="REC READ"')
         #print mobile.exec_command('+CLAC') OBTIENE LA LISTA DE COMANDOS AT SOPORTADOS POR EL TELEFONO
         #print mobile.exec_command('+COPS=0,0')
-        #print mobile.exec_command('+COPS?')
+        print mobile.exec_command('+CUSD=1,"*108#",15')
