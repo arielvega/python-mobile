@@ -1,0 +1,491 @@
+'''
+Created on 04/03/2012
+
+@author: ariel
+'''
+
+import re, os, datetime
+import threading
+import time
+
+__all__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'CommonThread']
+
+EOL = '\r\n'
+EOF = chr(26)
+RWSTORAGE = ['SM', 'ME', 'MT']
+KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
+''' 
+# Serial device to which the mobile device may be connected:
+/dev/ttyS*    for serial port, 
+/dev/ircomm*  for IrDA,
+/dev/ttyUB*   for Bluetooth (Bluez with rfcomm running),
+/dev/ttyUSB*  for USB,
+/dev/rfcomm*  Bluetooth serial port
+/dev/ttyACM*  for USB ACM 
+
+from: http://www.lugmen.org.ar/pipermail/lug-list/2005-April/035245.html
+'''
+
+'''
+AT^SYSCFG=mode,order,band,roaming,domain - System Config
+    mode:
+        2      Automatic search
+        13     2G only
+        14     3G only
+        16     No change
+        
+    order:
+        0    Automatic search
+        1    2G first, then 3G
+        2    3G first, then 2G
+        3    No change
+        
+    band:
+        80            GSM DCS systems
+        100           Extended GSM 900
+        200           Primary GSM 900
+        200000        GSM PCS
+        400000        WCDMA IMT 2000
+        3FFFFFFF      Any band
+        40000000      No change
+    
+    roaming:
+        0    Not supported
+        1    Roaming is supported
+        2    No change
+    
+    domain:
+        0    CS_ONLY
+        1    PS_ONLY
+        2    CS_PS
+        3    ANY
+        4    No change
+
+from: https://wiki.archlinux.org/index.php/Huawei_E1550_3G_modem
+'''
+
+ascii = re.compile('[a-zA-Z \r\n\t&\\\+\-\_\:\;\=\.\*\%!|@?\<\>\(\)0-9/\'\"\[\]\{\}\$]+',re.IGNORECASE)
+
+SMS_ASCII_LENGHT = 140
+SMS_NON_ASCII_LENGHT = 70
+
+def get_sms_lenght(text):
+    if ascii.match(text):
+        return SMS_ASCII_LENGHT
+    return SMS_NON_ASCII_LENGHT
+
+def split_sms_text(text):
+    lenght = get_sms_lenght(text)
+    l = []
+    while len(text)>0:
+        l.append(text[:lenght])
+        text = text[lenght:]
+    return l
+
+def get_os_port(port):
+    if os.name == 'nt': #sys.platform == 'win32':
+        return port
+    elif os.name == 'posix':
+        if port.startswith('/dev/'):
+            return port
+        else:
+            return '/dev/' + port
+    else:
+        raise Exception("Sorry: no implementation for your platform ('%s') available" % os.name)
+
+
+def parse_CMGR_txt_to_sms((txt, device), pos):
+    txt = txt[6:]
+    txt = txt.strip().split('\n')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) < 2):
+        return
+    try:
+        if(len(txt) == 2):
+            message = txt[-1]
+        else:
+            message = '\n'.join(txt[1:])
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        memory = txt[0].replace('"','')
+        phone = txt[1].replace('"','')
+        if(len(txt)>1):
+            date = (txt[-2] +', '+ txt[-1]).replace('"','')
+        else:
+            date=''
+        return SMS(message, phone, date, pos, memory, device)
+    except Exception, ex:
+        print ex
+        return
+
+
+def parse_txt_to_sms((txt, device)):
+    txt = txt.strip().split('\n')
+    #if (txt.count('ERROR')>0):
+    #    return
+    #while(txt.count('OK')>0):
+    #    txt.remove('OK')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) < 2):
+        return
+    try:
+        if(len(txt) == 2):
+            message = txt[-1]
+        else:
+            message = '\n'.join(txt[1:])
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        pos = txt[0].replace('"','')
+        memory = txt[1].replace('"','')
+        phone = txt[2].replace('"','')
+        if(len(txt)>3):
+            date = (txt[3] +', '+ txt[4]).replace('"','')
+        else:
+            date=''
+        return SMS(message, phone, date, pos, memory, device)
+    except Exception, ex:
+        print ex
+        return
+
+
+class SMS:
+    ''' Represents a SMS, it can be sent or deleted '''
+    def __init__(self, message, phone, date = datetime.date.today().strftime('%y/%m/%d,%T'), pos = -1, memory = 'VOLATILE', device = None):
+        self.__phone_number = phone
+        self.__message = message
+        self.__date = date
+        self.__position = int(pos)
+        self.__memory = memory
+        self.__device = device
+
+    def send(self):
+        if (self.__device == None) or (self.get_memory() == 'REC READ'):
+            print 'no se puede enviar el mensaje'
+            print self
+            return False
+        return self.__device.send_sms(self)
+
+    def delete(self):
+        if self.__device == None:
+            return
+        return self.__device.delete_sms(self)
+
+    def get_phone_number(self):
+        return self.__phone_number
+
+    def get_message(self):
+        return self.__message
+
+    def get_date(self):
+        return self.__date
+
+    def get_position(self):
+        return self.__position
+
+    def get_memory(self):
+        return self.__memory
+
+    def set_phone_number(self, number):
+        self.__phone_number = number
+
+    def set_message(self, message):
+        self.__message = message
+
+    def set_date(self, date):
+        self.__date = date
+
+    def set_position(self, position):
+        self.__position = position
+
+    def set_memory(self, memory):
+        self.__memory = memory
+
+    def __str__(self):
+        res = str(self.__phone_number) +'> '+ self.__message# + 'Date: '+ self.__date
+        return res[:15].replace('\n','')+'...'
+
+    def __repr__(self):
+        return str(self)
+
+    def __lt__(self, other):
+        if other == None:
+            return False
+        return self.get_date() > other.get_date()
+
+    def __le__(self, other):
+        if other == None:
+            return False
+        return self.get_date() >= other.get_date()
+
+    def __eq__(self, other):
+        if other == None:
+            return False
+        return self.get_date() == other.get_date()
+
+    def __ne__(self, other):
+        if other == None:
+            return True
+        return self.get_date() <> other.get_date()
+
+    def __gt__(self, other):
+        if other == None:
+            return False
+        return self.get_date() < other.get_date()
+
+    def __ge__(self, other):
+        if other == None:
+            return False
+        return self.get_date() <= other.get_date()
+
+    def __cmp__(self, other):
+        if other == None:
+            return False
+        return cmp(self.get_date(), other.get_date())
+
+    def __hash(self):
+        return hash(self.get_date())
+
+
+def parse_txt_to_phonebook((txt, device)):
+    txt = txt.strip().split('\r\n')
+    if (txt.count('ERROR')>0):
+        return PhoneBook('VOLATILE', 10, device)
+    while(txt.count('OK')>0):
+        txt.remove('OK')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) == 0):
+        return PhoneBook('VOLATILE', 10, device)
+    try:
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        location = txt[0].replace('"','')
+        capacity = txt[2].replace('"','')
+        return PhoneBook(location, capacity, device)
+    except:
+        return PhoneBook('VOLATILE', 10, device)
+
+
+
+class PhoneBook:
+    ''' Represents a phonebook '''
+    def __init__(self, location, capacity, device):
+        self.__location = location
+        self.__capacity = int(capacity)
+        self.__device = device
+        self.__entries = []
+        self.__used = 0
+
+    def get_location(self):
+        return self.__location
+
+    def get_used(self):
+        return self.__used
+
+    def get_capacity(self):
+        return self.__capacity
+
+    def add_entries(self, entry):
+        if len(self.__entries) == 0:
+            self.load()
+        if isinstance(entry, list):
+            for i in entry:
+                self.add_entry(i)
+
+    def add_entry(self, entry):
+        if len(self.__entries) == 0:
+            self.load()
+        if isinstance(entry, PhoneBookEntry):
+            if self.__entries[entry.get_position() - 1] <> None :
+                if self.__entries[entry.get_position() - 1] <> entry :
+                    entry.set_position(self.get_free_position())
+                else:
+                    return
+            if self.__entries.count(entry)>0:
+                return
+            self.__entries[entry.get_position() - 1] = entry
+            self.__used = self.__used + 1
+
+    def get_free_position(self):
+        i = 0
+        while i < self.__capacity:
+            if self.__entries[i] == None:
+                return i + 1
+            i = i + 1
+        return None
+
+    def create_entry(self, name, phone):
+        return PhoneBookEntry(name, phone, self.get_free_position(), phonebook = self)
+
+    def delete_entry(self, entry):
+        self.__device._delete_phonebook_entry(self.__location, entry)
+        self.__used = self.__used - 1
+
+    def save_entry(self, entry):
+        self.__device._save_phonebook_entry(self.__location, entry)
+
+    def load(self):
+        if len(self.__entries) == 0:
+            i = 0
+            while i < self.__capacity:
+                self.__entries.append(None)
+                i = i + 1
+        entries = self.__device._get_phonebook_entries(self.__location)
+        for entry in entries:
+            if entry <> None:
+                self.__entries[entry.get_position() - 1] = entry
+                self.__used = self.__used + 1
+
+    def __str__(self):
+        return 'Storage: ' + self.__location + '\nMax: ' + str(self.__capacity) + '\nUsed: ' + str(self.get_used()) + '\nEntries:\n' + '\n'.join([str(i) for i in self.__entries])
+
+    def __repr__(self):
+        return str(self)
+
+    def __iter__(self):
+        for e in self.__entries:
+            if e <> None:
+                yield e
+
+def parse_txt_to_phonebook_entry((txt, memory)):
+    txt = txt.strip().split('\r\n')
+    if (txt.count('ERROR')>0):
+        return
+    while(txt.count('OK')>0):
+        txt.remove('OK')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) == 0):
+        return
+    try:
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        pos = txt[0].replace('"','')
+        phone = txt[1].replace('"','')
+        type = txt[2].replace('"','')
+        name = txt[3].replace('"','')
+        return PhoneBookEntry(name, phone, pos, type, memory)
+    except:
+        return
+
+
+class PhoneBookEntry:
+    ''' It represents a entry on the phonebook '''
+    def __init__(self, name, phone, pos = -1, atype = 129, phonebook = None):
+        self.__name = name
+        self.__phone_number = phone
+        self.__position = int(pos)
+        self.__type = atype
+        self.__phonebook = phonebook
+
+    def get_name(self):
+        return self.__name
+
+    def get_phone_number(self):
+        return self.__phone_number
+
+    def get_position(self):
+        return self.__position
+
+    def get_type(self):
+        return self.__type
+
+    def get_phonebook(self):
+        return self.__phonebook
+
+    def set_name(self, name):
+        self.__name = name
+
+    def set_phone_number(self, number):
+        self.__phone_number = number
+
+    def set_position(self, position):
+        self.__position = position
+
+    def set_type(self, type):
+        self.__type = type
+
+    def set_phonebook(self, phonebook):
+        self.__phonebook = phonebook
+
+    def delete(self):
+        self.__phonebook.delete_entry(self)
+
+    def save(self):
+        self.__phonebook.save_entry(self)
+
+    def __str__(self):
+        return self.__name + ': ' + str(self.__phone_number)
+
+    def __repr__(self):
+        return str(self)
+
+    def __eq__(self, other):
+        try:
+            return self.__name == other.get_name() and self.__phone_number == other.get_phone_number() and self.__type == other.get_type()
+        except:
+            return False
+
+    def __neq__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if other == None:
+            return False
+        return self.get_name() < other.get_name()
+
+    def __le__(self, other):
+        if other == None:
+            return False
+        return self.get_name() <= other.get_name()
+
+    def __gt__(self, other):
+        if other == None:
+            return False
+        return self.get_name() > other.get_name()
+
+    def __ge__(self, other):
+        if other == None:
+            return False
+        return self.get_name() >= other.get_name()
+
+    def __cmp__(self, other):
+        try:
+            return cmp(self.get_name(), other.get_name())
+        except:
+            return True
+
+    def __hash(self):
+        return hash(self.get_name())
+
+
+class CommonThread(threading.Thread):
+    
+    def __init__(self):
+        threading.Thread.__init__(self)
+    
+    def execute(self):
+        raise NotImplementedError('CommonThread.execute() not implemented yet!')
+    
+    def run(self):
+        while self.__started:
+            self.execute()
+            time.sleep(0.1)
+
+    def start(self):
+        try:
+            self.__started = True
+            threading.Thread.start(self)
+            print 'inicia el hilo'
+        except:# Exception, ex:
+            #print ex
+            pass
+
+    def stop(self):
+        self.__started = False
