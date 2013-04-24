@@ -1,18 +1,46 @@
+#
+#
+# Copyright 2011,2013 Luis Ariel Vega Soliz and contributors.
+# ariel.vega@uremix.org
+#
+# This file is part of python-mobile.
+#
+#    python-mobile is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    python-mobile is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with UADH.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+
+
 '''
 Created on 04/03/2012
 
-@author: ariel
+@author: Luis Ariel Vega Soliz (vsoliz.ariel@gmail.com)
+@contact: Uremix Team (http://uremix.org)
+
 '''
 
 import re, os, datetime
 import threading
 import time
+from mobile import pdu
 
 __all__ = ['PhoneBook', 'PhoneBookEntry', 'SMS', 'CommonThread']
 
 EOL = '\r\n'
 EOF = chr(26)
 RWSTORAGE = ['SM', 'ME', 'MT']
+STATUSSTRTOCODE = {'REC UNREAD':0, 'REC READ':1, 'STO UNSENT':2, 'STO SENT':3, 'ALL':4}
+STATUSCODETOSTR = {0:'REC UNREAD', 1:'REC READ', 2:'STO UNSENT', 3:'STO SENT', 4:'ALL'}
 KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
 ''' 
 # Serial device to which the mobile device may be connected:
@@ -93,6 +121,70 @@ def get_os_port(port):
     else:
         raise Exception("Sorry: no implementation for your platform ('%s') available" % os.name)
 
+def smspdu2sms(smspdu, pos, status, device):
+    print smspdu
+    smscnumberlen = pdu.hex2int(smspdu[ : 2])
+    SMSC = smspdu[2: 2+(smscnumberlen*2)]
+    smscnumbertype = SMSC[:2]
+    smsc = pdu.semioctet2string(SMSC[2:])
+    if (smscnumbertype == '91' and not smsc.startswith('+')):
+        smsc = '+'+smsc
+    if (smsc.endswith('F')):
+        smsc = smsc[:-1]
+    TPDU = smspdu[2+(smscnumberlen*2): ]
+    fosmsdeliver = TPDU[ :2]
+    senderlen = pdu.hex2int(TPDU[2 : 2 +2])
+    if((senderlen % 2)<>0):
+        senderlen = senderlen + 1
+    sendernumbertype = TPDU[2+2 : 2+2 +2]
+    sender = pdu.semioctet2string(TPDU[2+2+2 : 2+2+2 +senderlen])
+    if (sendernumbertype == '91' and not sender.startswith('+')):
+        sender = '+'+sender
+    if (sender.endswith('F')):
+        sender = sender[:-1]
+    protocolID = TPDU[2+2+2+senderlen : 2+2+2+senderlen +2]
+    encoding = TPDU[2+2+2+senderlen+2 : 2+2+2+senderlen+2 +2]
+    date = pdu.pdudate2date(TPDU[2+2+2+senderlen+2+2 : 2+2+2+senderlen+2+2 +14])
+    smslen = pdu.hex2int(TPDU[2+2+2+senderlen+2+2+14 : 2+2+2+senderlen+2+2+14 +2])
+    smstext = pdu.decode(TPDU[2+2+2+senderlen+2+2+14+2 :])
+    return SMS(smstext, sender, date, pos, status, device)
+
+def pduread2sms((txt, device), pos):
+    txt = txt[6:]
+    txt = txt.strip().split('\n')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) <> 2):
+        return
+    try:
+        smspdu = txt[-1]
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        status = STATUSCODETOSTR[int(txt[0])]
+        return smspdu2sms(smspdu, pos, status, device)
+    except Exception, ex:
+        print ex
+        return
+
+def pdulist2sms((txt, device)):
+    txt = txt[6:]
+    txt = txt.strip().split('\n')
+    while(txt.count('')>0):
+        txt.remove('')
+    if(len(txt) <> 2):
+        return
+    try:
+        smspdu = txt[-1]
+        txt = txt[0].strip().split(',')
+        while(txt.count('')>0):
+            txt.remove('')
+        pos = txt[0]
+        status = STATUSCODETOSTR[int(txt[1])]
+        return smspdu2sms(smspdu, pos, status, device)
+    except Exception, ex:
+        print ex
+        return
 
 def parse_CMGR_txt_to_sms((txt, device), pos):
     txt = txt[6:]
@@ -482,9 +574,8 @@ class CommonThread(threading.Thread):
         try:
             self.__started = True
             threading.Thread.start(self)
-            print 'inicia el hilo'
-        except:# Exception, ex:
-            #print ex
+        except Exception, ex:
+            print ex
             pass
 
     def stop(self):

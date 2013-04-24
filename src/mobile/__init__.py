@@ -1,4 +1,28 @@
 #coding:utf-8
+
+#
+#
+# Copyright 2011,2013 Luis Ariel Vega Soliz and contributors.
+# ariel.vega@uremix.org
+#
+# This file is part of python-mobile.
+#
+#    python-mobile is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    python-mobile is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with UADH.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+
+
 '''
 Created on 04/08/2011
 
@@ -9,7 +33,6 @@ Created on 04/08/2011
 
 import serial, time, datetime, re, os, threading, math
 import pdu
-#from symbol import except_clause
 from mobile.common import *
 from mobile.common import KNOWNSERIALPORTS, EOL, EOF, RWSTORAGE, parse_CMGR_txt_to_sms, parse_txt_to_sms, split_sms_text, parse_txt_to_phonebook, parse_txt_to_phonebook_entry, get_os_port
 
@@ -17,25 +40,95 @@ from mobile.common import KNOWNSERIALPORTS, EOL, EOF, RWSTORAGE, parse_CMGR_txt_
 __all__ = ['ATTerminalConnection', 'MobileDevice', 'MobilePhone']
 
 
+class ATReader(CommonThread):
+        def __init__(self, port, timeout):
+            CommonThread.__init__(self)
+            self.res = ''
+            self.port = port
+            self.timeout = timeout
+            self.start()
+
+        def execute(self):
+            try:
+                if self.res == '':
+                    attc = ATTerminalConnection(self.port)
+                    attc.open()
+                    attc.set_timeout(self.timeout, True)
+                    print self.port
+                    self.res = attc.send_command('AT')
+                    attc.close()
+            except Exception, detail:
+                print detail
+
 def list_at_terminals(findlist = ['ttyUSB']):
     ''' Function that lists all the AT terminals connected to the computer '''
-    atlist = []
+    atlist = {}
+    atterms = []
     for interface in findlist:
         if interface in KNOWNSERIALPORTS:
             step = -1
             while step < 255:
                 step = step + 1
-                try:
-                    attc = ATTerminalConnection(interface + str(step))
-                    attc.open()
-                    attc.set_timeout(0.01)
-                    res = attc.send_command('AT')
-                    if res <> None and ('OK' in res or 'AT' in res):
-                        atlist.append(attc)
-                        attc.set_timeout(None)
-                    attc.close()
-                except Exception, detail:
-                    pass
+                atreader = ATReader(interface + str(step), 0.05)
+                atterms.append(atreader)
+                time.sleep(0.001)
+    for atreader in atterms:
+        print 'atreader('+atreader.port+').res = '+atreader.res
+        if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
+            tmpattc = ATTerminalConnection(atreader.port)
+            device = MobileDevice(tmpattc)
+            imei = device.get_imei()
+            tmpattc.stop()
+            if not atlist.has_key(imei):
+                atlist[imei] = []
+            atlist[imei].append(ATTerminalConnection(atreader.port))
+        atreader.stop()
+    return atlist
+
+def test_at_terminals(findlist):
+    ''' Function that test the AT terminals given in the findlist and returns the list of terminal grouped by device  '''
+    atlist = {}
+    atterms = []
+    for interface in findlist:
+            atreader = ATReader(interface, 0.2)
+            atterms.append(atreader)
+            time.sleep(0.1)
+    for atreader in atterms:
+        print 'atreader('+atreader.port+').res = '+atreader.res
+        if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
+            tmpattc = ATTerminalConnection(atreader.port)
+            device = MobileDevice(tmpattc)
+            imei = device.get_imei()
+            tmpattc.stop()
+            if not atlist.has_key(imei):
+                atlist[imei] = []
+            atlist[imei].append(ATTerminalConnection(atreader.port))
+        atreader.stop()
+    return atlist
+
+def list_at_ports(findlist = ['ttyUSB']):
+    ''' Function that lists all the AT ports present into the computer '''
+    atlist = {}
+    atterms = []
+    for interface in findlist:
+        if interface in KNOWNSERIALPORTS:
+            step = -1
+            while step < 255:
+                step = step + 1
+                atreader = ATReader(interface + str(step), 0.05)
+                atterms.append(atreader)
+                time.sleep(0.001)
+    for atreader in atterms:
+        print 'atreader('+atreader.port+').res = '+atreader.res
+        if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
+            tmpattc = ATTerminalConnection(atreader.port)
+            device = MobileDevice(tmpattc)
+            imei = device.get_imei()
+            if not atlist.has_key(imei):
+                atlist[imei] = []
+            atlist[imei].append(atreader.port)
+            tmpattc.stop()
+        atreader.stop()
     return atlist
 
 class ATListener:
@@ -43,7 +136,10 @@ class ATListener:
         raise NotImplementedError()
 
 class ATTerminalConnection(CommonThread):
-    ''' Represents a terminal who process AT commands '''
+    ''' Represents a terminal who process AT commands, the terminal can be:
+            * a normal terminal (a terminal for common I/O commands)
+            * or a feedback terminal (a terminal who emits status messages, events messages, info messages, etc. )
+    '''
     def __init__(self, port = '/dev/ttyUSB0', atlistener = None):
         CommonThread.__init__(self)
         self.__port_name = get_os_port(port)
@@ -53,6 +149,10 @@ class ATTerminalConnection(CommonThread):
         self.__atlistener = atlistener
         self.__started = False
         self.__mutex = threading.Lock()
+        self.__is_feedback = False
+
+    def has_feedback(self):
+        return self.__is_feedback
 
     def get_port_name(self):
         return self.__port_name
@@ -74,29 +174,18 @@ class ATTerminalConnection(CommonThread):
 
     def send_direct_command(self, command, response = False):
         if(self.is_open()):
-            #print '::::::::::::::::::::::::::::::::::::::::::::::::'
             self.__mutex.acquire()
-            #print 'bloquea send_direct_command'
             self.__port.write(command)
-            #c = command.replace('\r','')
-            #c = c.replace('\n','')
             if response:
                 res = self.read_buffer()
                 self.__mutex.release()
-                #print 'desbloquea send_direct_command'
-                #r = res.replace('\r','')
-                #r = r.replace('\n','')
-                #print c+' :: '+r
                 return res
             else:
-                #print c
                 self.__mutex.release()
-                #print 'desbloquea send_direct_command'
                 pass
 
     def execute(self):
         self.__mutex.acquire()
-        #print 'bloquea run'
         self.read_buffer()
         self.__mutex.release()
 
@@ -149,6 +238,8 @@ class ATTerminalConnection(CommonThread):
         return res
 
     def __process_status_response_(self, response):
+        if (response.strip().startswith('^')):
+            self.__is_feedback = True
         event = response
         source = {}
         if self.__atlistener <> None:
@@ -167,10 +258,10 @@ class ATTerminalConnection(CommonThread):
         if self.__port == None:
             return
         self.__mutex.acquire()
-        #print 'bloquea clear_buffer'
+        #'bloquea clear_buffer'
         self.__port.flushInput()
         self.__mutex.release()
-        #print 'desbloquea clear_buffer'
+        #'desbloquea clear_buffer'
 
     def open(self):
         if (self.is_open()):
@@ -190,12 +281,14 @@ class ATTerminalConnection(CommonThread):
             self.__port.close()
             self.__is_open = False
         except:
-            pass
+            raise
 
-    def set_timeout(self, timeout):
+    def set_timeout(self, timeout, write=False):
         self.__timeout = timeout
         if self.__port <> None:
             self.__port.setTimeout(timeout)
+            if write:
+                self.__port.setWriteTimeout(timeout)
 
     def get_timeout(self):
         return self.__timeout
@@ -249,16 +342,17 @@ class HuaweiATListener(ATListener, CommonThread):
         self.__mutex.acquire()
         self.__funcs.append((self.listen_event, event))
         self.__mutex.release()
-        
+
     def listen_event(self, event):
         print '::::::::::::::::::::::::'
-        #print event
+        print event
         if event.startswith('+CMTI:'):
             pos = event.split('\n')
             pos = pos[0].split(',')[-1]
             pos = int(pos)
             res = self.__device.get_sms(pos)
-            print parse_CMGR_txt_to_sms((res, self.__device), pos)
+            print res
+            #print parse_CMGR_txt_to_sms((res, self.__device), pos)
             pass
         elif event.startswith('+CMT:'):
             txt = event[5:]
@@ -290,6 +384,7 @@ class HuaweiATListener(ATListener, CommonThread):
             print 'signal: '+str(x)+'%'
             pass
         elif event.startswith('+CUSD:'):
+            print event
             cusd = event.split(',')
             msg = pdu.decode(cusd[1].replace('"',''))
             print msg
@@ -350,7 +445,8 @@ class HuaweiATListener(ATListener, CommonThread):
             else:
                 modeinfo['link']='Unknow'
 
-            print modeinfo
+            #print modeinfo
+            self.__device.emit('connection_info', modeinfo)
             pass
         elif event.startswith('RING'):
             pass
@@ -371,15 +467,16 @@ class MobileDevice(ATListener):
         self.__country_code = ''
         self._listeners = {}
         self._listeners['new_sms'] = []
-        self._listeners['change_rssi'] = []
+        self._listeners['signal_change'] = []
         self._listeners['new_ussd'] = []
-        self._listeners['dataflow'] = []
+        self._listeners['dataflow_change'] = []
+        self._listeners['connection_info'] = []
         self._prepare()
 
     def emit(self, event, data):
         if event in self._listeners.keys():
             for listener in self._listeners[event]:
-                listener(self)
+                listener(self, data)
 
     def get_events(self):
         return self._listeners.keys()
@@ -404,6 +501,7 @@ class MobileDevice(ATListener):
         self._port.exec_command('AT+CFUN=1')
         self._port.exec_command('ATE0')
         self._port.exec_command('AT+CMGF=1')
+        #self._port.exec_command('AT+CMGF=0')
         self._port.exec_command('AT+CPMS="MT","MT","MT"')
         self._port.exec_command('AT+COPS=0,0')
         self._port.exec_command('AT^SYSCFG=2,0,3FFFFFFF,1,3')
@@ -425,9 +523,33 @@ class MobileDevice(ATListener):
             self.__model = self.__model.replace('\r', '')
         return self.__model
 
+    def __testIMEIChecksum(self, digits):
+        _sum = 0
+        alt = False
+        for d in reversed(digits):
+            assert 0 <= d <= 9
+            if alt:
+                d *= 2
+            if d > 9:
+                d -= 9
+            _sum += d
+            alt = not alt
+        return (_sum % 10) == 0
+
+    def __checkIMEI(self, imei):
+        if len(imei) != 15:
+            return False
+        if not self.__testIMEIChecksum(map(int, imei)):
+            return False
+        return True
+
     def get_imei(self):
         if self.__imei == '':
             self.__imei = self._port.send_command('AT+CGSN')
+            self.__imei = self.__imei.replace('\n', '')
+            if not self.__checkIMEI(self.__imei):
+                self.__imei = ''
+                return self.get_imei()
         return self.__imei
 
     def get_operator(self):
@@ -445,6 +567,11 @@ class MobileDevice(ATListener):
             self.__network_code = res[3:]
             self.__mobile_network_code = res
             self.__country_code = res[:3]
+            if not self.__network_code.isalnum() or not self.__mobile_network_code.isalnum() or not self.__country_code.isalnum():
+                self.__network_code = ''
+                self.__mobile_network_code = ''
+                self.__country_code = ''
+                return self.get_mobile_network_code()
         return self.__mobile_network_code
 
     def get_network_code(self):
@@ -455,6 +582,11 @@ class MobileDevice(ATListener):
             self.__network_code = res[3:]
             self.__mobile_network_code = res
             self.__country_code = res[:3]
+            if not self.__network_code.isalnum() or not self.__mobile_network_code.isalnum() or not self.__country_code.isalnum():
+                self.__network_code = ''
+                self.__mobile_network_code = ''
+                self.__country_code = ''
+                return self.get_network_code()
         return self.__network_code
 
     def get_country_code(self):
@@ -465,6 +597,11 @@ class MobileDevice(ATListener):
             self.__network_code = res[3:]
             self.__mobile_network_code = res
             self.__country_code = res[:3]
+            if not self.__network_code.isalnum() or not self.__mobile_network_code.isalnum() or not self.__country_code.isalnum():
+                self.__network_code = ''
+                self.__mobile_network_code = ''
+                self.__country_code = ''
+                return self.get_country_code()
         return self.__country_code
 
     def get_signal_strenght(self):
@@ -489,9 +626,9 @@ class MobileDevice(ATListener):
         except:
             return False
 
-    def _list_sms(self, phone , memory = 'ALL'):
+    def _list_sms(self, phone , status = 'ALL'):
         self._port.clear_buffer()
-        res = self._port.send_command('AT+CMGL="'+memory+'"')
+        res = self._port.send_command('AT+CMGL="'+status+'"')
         res = res.split('+CMGL:')
         while(res.count('\r\n')>0):
             res.remove('\r\n')
@@ -538,12 +675,20 @@ class MobileDevice(ATListener):
     def exec_command(self, cmd):
         return self._port.send_command('AT' + cmd)
 
+    def is_waiting_PIN(self):
+        res = self._port.send_command('AT+CPIN?')
+        res = res.replace('+CPIN: ', '')
+        return res <> 'READY'
+
+    def give_PIN(self, pin):
+        self._port.send_command('AT+CPIN="'+pin+'"')
+
 
 
 class MobilePhone(MobileDevice):
     ''' Represents a mobile phone, it has methods for make and response a call '''
 
-    def __init__(self, atport):
+    def __init__(self, atport, mic=None, speaker=None):
         MobileDevice.__init__(self, atport)
         self._port.set_timeout(0.5)
         #self._port.set_timeout(None)
@@ -638,8 +783,10 @@ class MobilePhone(MobileDevice):
 
 
 if __name__ == '__main__':
-    terms = list_at_terminals() # list available terminals :D
-    print terms
+    #terms = list_at_ports() # list available terminals :D
+    terms = test_at_terminals(['ttyUSB0','ttyUSB1','ttyUSB2'])
+    #terms=[1]
+    #print terms
     #print pdu.decode('07919571870300F70404A078780000212020002181004CD3309BFC06A5DDF3BA393D4E97DDF432081E968741F272989DD687E5207618449787DDF3F0789C7EBB59A0B49B5E76D3CBA0F1DB0DAABB41EDB79BFE06B5CBEEB7DC05')
     #print pdu.decode('C274D96D2FBBD3E437280CA2A6CF6FD014FD86C3D3EE330B5466A7CF65D01B3E4EBFDD3A8522E66A41C3F17A999E3EBFE70A99AB452D83E2F532393CA79741F3B41B349697C969FAFBA798B95ACBF47BBE7E83A8C9E3534173B582637ADA1E064DC36CF21B0495BFDB6F05')
     #print pdu.encode('مرحبا')
@@ -647,34 +794,53 @@ if __name__ == '__main__':
     #+CUSD: 1,"C274D96D2FBBD3E437280CA2A6CF6FD014FD86C3D3EE330B5466A7CF65D01B3E4EBFDD3A8522E66A41C3F17A999E3EBFE70A99AB452D83E2F532393CA79741F3B41B349697C969FAFBA798B95ACBF47BBE7E83A8C9E3534173B582637ADA1E064DC36CF21B0495BFDB6F05",15
     
     #print pdu.decode('0404A078780000212020002181004CD3309BFC06A5DDF3BA393D4E97DDF432081E968741F272989DD687E5207618449787DDF3F0789C7EBB59A0B49B5E76D3CBA0F1DB0DAABB41EDB79BFE06B5CBEEB7DC05')
+    #terms = [ATTerminalConnection('ttyUSB4')]
     if len(terms)>0:
-        mobile = MobilePhone(terms[-1]) # create a mobile phone with the last terminal
-        terms[-1].start()
-        #sms = mobile.create_sms('saldo', 2255) # we create a SMS
-        #sms = mobile.create_sms('4040901570989', 171) # cargamos al chip
-        #sms = mobile.create_sms('hora', 4646) # habilitamos internet
+        print terms
+        #term = ATTerminalConnection(terms[-1])
+        term = ATTerminalConnection('ttyUSB1')
+        mobilep = MobilePhone(term) # create a mobile phone with the last terminal
+        term.start()
+        #sms = mobilep.create_sms('saldo', 2255) # we create a SMS
+        #sms = mobilep.create_sms('4040901570989', 171) # cargamos al chip
+        #sms = mobilep.create_sms('hora', 4646) # habilitamos internet
         #sms.send() # yeah babe! :D
-        #l =  mobile.list_sms('2255')
-        #l =  mobile.list_new_sms('2255')
+        #l =  mobilep.list_sms('2255')
+        #l =  mobilep.list_new_sms('2255')
         #print l
         #for msg in l:
         #    msg.delete()
-        #print mobile.get_manufacturer()
-        #print mobile.get_model()
-        #print mobile.get_country_code()
-        #print mobile.get_network_code()
-        #print mobile.get_phonebook()
-        ##mobile.USSD_command('*222#')
+        #print mobilep.get_manufacturer()
+        #print mobilep.get_model()
+        #print mobilep.get_country_code()
+        #print mobilep.get_network_code()
+        #print mobilep.get_phonebook()
+        #mobilep.USSD_command('*222#')
+        ###########RECARGA
+        mobilep.USSD_command('*222#')
+        time.sleep(15)
+        mobilep.USSD_command('2')
+        time.sleep(15)
+        mobilep.USSD_command('1')
+        time.sleep(15)
+        mobilep.USSD_command('3')
+        #mobilep.call('*7759637046977533')
         #print 'duerme'
         #time.sleep(5)
         #print 'despierta'
-        #mobile.USSD_command('1')
-        #print mobile.get_sms(3)
-        #print mobile.list_sms() # watch the sms's on the phone :D
-        #mobile._prepare()
-        #print mobile.call('70927261')
-        #print mobile.exec_command('+CPMS="SM","SM","SM"')
-        #print mobile.exec_command('+CMGL="REC READ"')
-        #print mobile.exec_command('+CLAC') OBTIENE LA LISTA DE COMANDOS AT SOPORTADOS POR EL TELEFONO
-        #print mobile.exec_command('+COPS=0,0')
-        #print mobile.exec_command('+CUSD=1,'+pdu.encode('*105#')+',15')
+        #mobilep.USSD_command('75341616')
+        #print 'duerme'
+        #time.sleep(8)
+        #print 'despierta'
+        #mobilep.USSD_command('1')
+        #print mobilep.get_sms(3)
+        #print mobilep.list_sms() # watch the sms's on the phone :D
+        #mobilep._prepare()
+        #print mobilep.call('70927261')
+        #print mobilep.exec_command('+CPMS="SM","SM","SM"')
+        #print mobilep.exec_command('+CMGL="REC READ"')
+        #print mobilep.exec_command('+CLAC') OBTIENE LA LISTA DE COMANDOS AT SOPORTADOS POR EL TELEFONO
+        #print mobilep.exec_command('+COPS=0,0')
+        #print mobilep.exec_command('+CUSD=1,'+pdu.encode('*105#')+',15')
+        #m = mobilep.get_manufacturer()
+        #print m

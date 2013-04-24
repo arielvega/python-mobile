@@ -101,26 +101,23 @@ def decode(src):
     tmp_out = ''
     acumul = ''
     decoded = ''
-    while char_nr <= len(bits):
+    l = len(bits)
+    #while char_nr <= l:
+    while char_nr < l:
         byte = bits[char_nr + i:char_nr + 8]
         tmp_out += byte + "+" + acumul + " "
         byte += acumul
         c = chr(bits2int(byte))
-
         decoded += c
-
         acumul = bits[char_nr:char_nr + i]
-
         i += 1
         char_nr += 8
-
         if i==8:
             i = 1
             char_nr
             decoded += chr(bits2int(acumul))
             acumul=''
             tmp_out += "\n"
-
     return gsm2latin(decoded)
 
 
@@ -188,7 +185,9 @@ def gsm2latin(gsm):
     """
     i = 0
     latin = ''
-    while i < len(gsm) - 1:
+    l = len(gsm)
+    #while i < len(gsm) - 1:
+    while i < l:
         if str(ord(gsm[i])) in gsm_to_latin:
             latin += chr(gsm_to_latin[str(ord(gsm[i]))])
         else:
@@ -196,3 +195,113 @@ def gsm2latin(gsm):
         i += 1
 
     return latin
+
+def semioctet2string(semistring):
+    res =''
+    for i in range(len(semistring)/2):
+        byte = semistring[i*2:(i*2)+2]
+        res = res + byteSwap(byte)
+    return res
+
+def pdudate2date(pdudate):
+    pdudate = semioctet2string(pdudate)
+    pdudate = pdudate[:2]+'/'+pdudate[2:4]+'/'+pdudate[4:6]+','+pdudate[6:8]+':'+pdudate[8:10]+':'+pdudate[10:12]+'+'+pdudate[12:]
+    return pdudate
+
+def smspdu2text_(smspdu):
+    print smspdu
+    smscnumberlen = hex2int(smspdu[ : 2])
+    print 'smsc lenght: %d'%smscnumberlen
+    SMSC = smspdu[2: 2+(smscnumberlen*2)]
+    smscnumbertype = SMSC[:2]
+    print 'sms center type: %s'%smscnumbertype
+    smsc = semioctet2string(SMSC[2:])
+    if (smscnumbertype == '91' and not smsc.startswith('+')):
+        smsc = '+'+smsc
+    if (smsc.endswith('F')):
+        smsc = smsc[:-1]
+    print 'sms center: %s'%smsc
+    TPDU = smspdu[2+(smscnumberlen*2): ]
+    fosmsdeliver = TPDU[ :2]
+    print 'first octet deliver message: %s'%fosmsdeliver
+    senderlen = hex2int(TPDU[2 : 2 +2])
+    print 'sender lenght: %d'%senderlen
+    if((senderlen % 2)<>0):
+        senderlen = senderlen + 1
+    sendernumbertype = TPDU[2+2 : 2+2 +2]
+    print 'sender type: %s'%sendernumbertype
+    sender = semioctet2string(TPDU[2+2+2 : 2+2+2 +senderlen])
+    if (sendernumbertype == '91' and not sender.startswith('+')):
+        sender = '+'+sender
+    if (sender.endswith('F')):
+        sender = sender[:-1]
+    print 'sender: %s'%sender
+    protocolID = TPDU[2+2+2+senderlen : 2+2+2+senderlen +2]
+    print 'protocol id: %s'%protocolID
+    encoding = TPDU[2+2+2+senderlen+2 : 2+2+2+senderlen+2 +2]
+    print 'encoding scheme: %s'%encoding
+    date = pdudate2date(TPDU[2+2+2+senderlen+2+2 : 2+2+2+senderlen+2+2 +14])
+    print 'date: %s\n'%date
+    print TPDU[2+2+2+senderlen+2+2+14 : 2+2+2+senderlen+2+2+14 +2]
+    smslen = hex2int(TPDU[2+2+2+senderlen+2+2+14 : 2+2+2+senderlen+2+2+14 +2])
+    print 'sms lenght: %d'%smslen
+    #smstext = decode(smspdu[deliverpos+2+2+2+senderlen+2+2+14+2 : deliverpos+2+2+2+senderlen+2+2+14+2 +(smslen*2)])
+    smstext = decode(TPDU[2+2+2+senderlen+2+2+14+2 :])
+    print smstext
+
+def smspdu2text(smspdu):
+    print smspdu
+    smsclen = hex2int(smspdu[ : 2])
+    print 'smsc lenght: %d'%smsclen
+    SMSC = smspdu[2: 2+(smsclen*2)]
+    smsctype = SMSC[:2]
+    print 'sms center type: %s'%smsctype
+    smsc = semioctet2string(SMSC[2:])
+    if (smsctype == '91' and not smsc.startswith('+')):
+        smsc = '+'+smsc
+    if (smsc.endswith('F')):
+        smsc = smsc[:-1]
+    print 'sms center: %s'%smsc
+
+
+    TPDU = smspdu[2+(smsclen*2): ]
+    fosmsdeliver = TPDU[ :2]
+    print 'first octet deliver message: %s'%fosmsdeliver
+    senderlen = hex2int(TPDU[2 : 2 +2])
+    print 'sender lenght: %d'%senderlen
+    if((senderlen % 2)<>0):
+        senderlen = senderlen + 1
+    sendertype = TPDU[2+2 : 2+2 +2]
+    print 'sender type: %s'%sendertype
+    sender = semioctet2string(TPDU[2+2+2 : 2+2+2 +senderlen])
+    if (sendertype == '91' and not sender.startswith('+')):
+        sender = '+'+sender
+    if (sender.endswith('F')):
+        sender = sender[:-1]
+    print 'sender: %s'%sender
+    proto = TPDU[2+2+2+senderlen : 2+2+2+senderlen +2]
+    print 'protocol id: %s'%proto
+    enc = TPDU[2+2+2+senderlen+2 : 2+2+2+senderlen+2 +2]
+    print 'encoding scheme: %s'%enc
+    date = pdudate2date(TPDU[2+2+2+senderlen+2+2 : 2+2+2+senderlen+2+2 +14])
+    print 'date: %s\n'%date
+    print TPDU[2+2+2+senderlen+2+2+14 : 2+2+2+senderlen+2+2+14 +2]
+    smslen = hex2int(TPDU[2+2+2+senderlen+2+2+14 : 2+2+2+senderlen+2+2+14 +2])
+    print 'sms lenght: %d'%smslen
+    #smstext = decode(smspdu[deliverpos+2+2+2+senderlen+2+2+14+2 : deliverpos+2+2+2+senderlen+2+2+14+2 +(smslen*2)])
+    smstext = decode(TPDU[2+2+2+senderlen+2+2+14+2 :])
+    print smstext
+
+if __name__=='__main__':
+    #+CMGL: 1,1,,18 (viva)
+    msg1 = '07919571700000F0A008A1072927160000213031320165690141'
+    #+CMGL: 2,1,,72 (viva)
+    msg2='07919571700060F50003A101F5000021609190401369415357704CAF87D93A980B065314F1701D2CD682D55A32584CA62086E9EFB90EE6820915D3F6FC280FD3D3731D4D310DB3ED617BDA1E9EEB6A0A'
+    #+CMGL: 14,1,,23 (tigo)
+    msg3='07919571870300F70408A12751563700002180018112946906D3793A0D8703'
+    #+CMGL: 8,1,,25
+    msg4='07919571870300F70408A0970006680000218001714573690932580D56ABC16438'
+    msg6='07915892000000F0010B915892214365F700002180311061520021493A283D0795C3F33C88FE06CDCB6E32885EC6D341EDF27C1E3E97E72E'
+    msg5='00010B915892214365F700002180311061520021493A283D0795C3F33C88FE06CDCB6E32885EC6D341EDF27C1E3E97E72E'
+    msg7='07915892000000F001000B915892214365F700000021493A283D0795C3F33C88FE06CDCB6E32885EC6D341EDF27C1E3E97E72E'
+    smspdu2text(msg5)
