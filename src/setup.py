@@ -24,7 +24,7 @@
 '''
 Created on 26/10/2011
 
-@author: Luis Ariel Vega Soliz (vsoliz.ariel@gmail.com)
+@author: Luis Ariel Vega Soliz (ariel.vega@uremix.org)
 @contact: Uremix Team (http://uremix.org)
 
 '''
