@@ -41,7 +41,7 @@ EOF = chr(26)
 RWSTORAGE = ['SM', 'ME', 'MT']
 STATUSSTRTOCODE = {'REC UNREAD':0, 'REC READ':1, 'STO UNSENT':2, 'STO SENT':3, 'ALL':4}
 STATUSCODETOSTR = {0:'REC UNREAD', 1:'REC READ', 2:'STO UNSENT', 3:'STO SENT', 4:'ALL'}
-KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM']
+KNOWNSERIALPORTS = ['ttyS', 'ircomm', 'ttyUB', 'ttyUSB', 'rfcomm', 'ttyACM', 'COM']
 ''' 
 # Serial device to which the mobile device may be connected:
 /dev/ttyS*    for serial port, 
@@ -110,14 +110,35 @@ def split_sms_text(text):
         text = text[lenght:]
     return l
 
-def get_os_port(port):
+def exist_port(port):
+    port = get_os_port(port)
     if os.name == 'nt': #sys.platform == 'win32':
-        return port
+        return True
+    else:
+        return os.path.exists(port)
+
+def get_os_port(port):
+    oldport = False
+    if type(port) == type(''):
+        port = port.strip()
+        if not port.isdigit():
+            if port.startswith('/dev/'):
+                port = port[5:]
+            if port.upper().startswith('COM'):
+                port = port[3:]
+            else:
+                for tp in KNOWNSERIALPORTS:
+                    if port.startswith(tp):
+                        oldport = port
+                        port = port[len(tp):]
+                        break
+    if os.name == 'nt': #sys.platform == 'win32':
+        return 'COM' + port
     elif os.name == 'posix':
-        if port.startswith('/dev/'):
-            return port
+        if not oldport:
+            return '/dev/ttyUSB' + str(port)
         else:
-            return '/dev/' + port
+            return '/dev/' + oldport
     else:
         raise Exception("Sorry: no implementation for your platform ('%s') available" % os.name)
 

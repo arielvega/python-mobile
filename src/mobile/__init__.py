@@ -33,6 +33,7 @@ Created on 04/08/2011
 
 import serial, time, datetime, re, os, threading, math
 import pdu
+from mobile import common
 from mobile.common import *
 from mobile.common import KNOWNSERIALPORTS, EOL, EOF, RWSTORAGE, parse_CMGR_txt_to_sms, parse_txt_to_sms, split_sms_text, parse_txt_to_phonebook, parse_txt_to_phonebook_entry, get_os_port
 
@@ -69,8 +70,9 @@ def list_at_terminals(findlist = ['ttyUSB']):
             step = -1
             while step < 255:
                 step = step + 1
-                atreader = ATReader(interface + str(step), 0.05)
-                atterms.append(atreader)
+                if common.exist_port(step):
+                    atreader = ATReader(interface + str(step), 0.05)
+                    atterms.append(atreader)
                 time.sleep(0.001)
     for atreader in atterms:
         print 'atreader('+atreader.port+').res = '+atreader.res
@@ -115,8 +117,9 @@ def list_at_ports(findlist = ['ttyUSB']):
             step = -1
             while step < 255:
                 step = step + 1
-                atreader = ATReader(interface + str(step), 0.05)
-                atterms.append(atreader)
+                if common.exist_port(step):
+                    atreader = ATReader(interface + str(step), 0.05)
+                    atterms.append(atreader)
                 time.sleep(0.001)
     for atreader in atterms:
         print 'atreader('+atreader.port+').res = '+atreader.res
@@ -783,8 +786,8 @@ class MobilePhone(MobileDevice):
 
 
 if __name__ == '__main__':
-    #terms = list_at_ports() # list available terminals :D
-    terms = test_at_terminals(['ttyUSB0','ttyUSB1','ttyUSB2'])
+    terms = list_at_ports() # list available terminals :D
+    #terms = test_at_terminals(['ttyUSB0','ttyUSB1','ttyUSB2'])
     #terms=[1]
     #print terms
     #print pdu.decode('07919571870300F70404A078780000212020002181004CD3309BFC06A5DDF3BA393D4E97DDF432081E968741F272989DD687E5207618449787DDF3F0789C7EBB59A0B49B5E76D3CBA0F1DB0DAABB41EDB79BFE06B5CBEEB7DC05')
@@ -797,17 +800,31 @@ if __name__ == '__main__':
     #terms = [ATTerminalConnection('ttyUSB4')]
     if len(terms)>0:
         print terms
-        #term = ATTerminalConnection(terms[-1])
-        term = ATTerminalConnection('ttyUSB1')
+        #term = ATTerminalConnection(terms['357650018406984'][0])
+        term = ATTerminalConnection(terms.values()[0][0])
+        #term = ATTerminalConnection('ttyUSB1')
         mobilep = MobilePhone(term) # create a mobile phone with the last terminal
         term.start()
-        #sms = mobilep.create_sms('saldo', 2255) # we create a SMS
+        #sms = mobilep.create_sms('INTERNET', 5599)
+        #sms.send()
+        #time.sleep(10)
+        #sms = mobilep.create_sms('SI',5599)
+        #sms.send()
+        #time.sleep(5)
+        sms = mobilep.create_sms('saldo', 172) # we create a SMS
         #sms = mobilep.create_sms('4040901570989', 171) # cargamos al chip
         #sms = mobilep.create_sms('hora', 4646) # habilitamos internet
-        #sms.send() # yeah babe! :D
+        sms.send() # yeah babe! :D
+        time.sleep(5)
+        print 'enviado'
         #l =  mobilep.list_sms('2255')
         #l =  mobilep.list_new_sms('2255')
-        #print l
+        l = mobilep.list_sms()
+        for sms in l:
+            print sms.get_phone_number()
+            print sms.get_message()
+            sms.delete()
+            print '-----------------------------------------'
         #for msg in l:
         #    msg.delete()
         #print mobilep.get_manufacturer()
@@ -817,13 +834,13 @@ if __name__ == '__main__':
         #print mobilep.get_phonebook()
         #mobilep.USSD_command('*222#')
         ###########RECARGA
-        mobilep.USSD_command('*222#')
-        time.sleep(15)
-        mobilep.USSD_command('2')
-        time.sleep(15)
-        mobilep.USSD_command('1')
-        time.sleep(15)
-        mobilep.USSD_command('3')
+        #mobilep.USSD_command('*222#')
+        #time.sleep(15)
+        #mobilep.USSD_command('2')
+        #time.sleep(15)
+        #mobilep.USSD_command('1')
+        #time.sleep(15)
+        #mobilep.USSD_command('3')
         #mobilep.call('*7759637046977533')
         #print 'duerme'
         #time.sleep(5)
