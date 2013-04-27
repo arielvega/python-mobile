@@ -41,26 +41,6 @@ from mobile.common import KNOWNSERIALPORTS, EOL, EOF, RWSTORAGE, parse_CMGR_txt_
 __all__ = ['ATTerminalConnection', 'MobileDevice', 'MobilePhone']
 
 
-class ATReader(CommonThread):
-        def __init__(self, port, timeout):
-            CommonThread.__init__(self)
-            self.res = ''
-            self.port = port
-            self.timeout = timeout
-            self.start()
-
-        def execute(self):
-            try:
-                if self.res == '':
-                    attc = ATTerminalConnection(self.port)
-                    attc.open()
-                    attc.set_timeout(self.timeout, True)
-                    print self.port
-                    self.res = attc.send_command('AT')
-                    attc.close()
-            except Exception, detail:
-                print detail
-
 def list_at_terminals(findlist = ['ttyUSB']):
     ''' Function that lists all the AT terminals connected to the computer '''
     atlist = {}
@@ -76,40 +56,21 @@ def list_at_terminals(findlist = ['ttyUSB']):
                 time.sleep(0.001)
     for atreader in atterms:
         print 'atreader('+atreader.port+').res = '+atreader.res
+        atreader.stop()
         if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
             tmpattc = ATTerminalConnection(atreader.port)
             device = MobileDevice(tmpattc)
             imei = device.get_imei()
             tmpattc.stop()
+            device.power_off()
             if not atlist.has_key(imei):
                 atlist[imei] = []
-            atlist[imei].append(ATTerminalConnection(atreader.port))
-        atreader.stop()
-    return atlist
-
-def test_at_terminals(findlist):
-    ''' Function that test the AT terminals given in the findlist and returns the list of terminal grouped by device  '''
-    atlist = {}
-    atterms = []
-    for interface in findlist:
-            atreader = ATReader(interface, 0.2)
-            atterms.append(atreader)
-            time.sleep(0.1)
-    for atreader in atterms:
-        print 'atreader('+atreader.port+').res = '+atreader.res
-        if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
-            tmpattc = ATTerminalConnection(atreader.port)
-            device = MobileDevice(tmpattc)
-            imei = device.get_imei()
-            tmpattc.stop()
-            if not atlist.has_key(imei):
-                atlist[imei] = []
-            atlist[imei].append(ATTerminalConnection(atreader.port))
-        atreader.stop()
+            #atlist[imei].append(ATTerminalConnection(atreader.port))
+            atlist[imei].append(tmpattc)
     return atlist
 
 def list_at_ports(findlist = ['ttyUSB']):
-    ''' Function that lists all the AT ports present into the computer '''
+    ''' Function that return a lists of strings that contains all the AT ports present into the computer, groupde by IMEI '''
     atlist = {}
     atterms = []
     for interface in findlist:
@@ -123,28 +84,86 @@ def list_at_ports(findlist = ['ttyUSB']):
                 time.sleep(0.001)
     for atreader in atterms:
         print 'atreader('+atreader.port+').res = '+atreader.res
+        atreader.stop()
+        if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
+            device = MobileDevice(ATTerminalConnection(atreader.port))
+            imei = device.get_imei()
+            device.power_off()
+            if not atlist.has_key(imei):
+                atlist[imei] = []
+            atlist[imei].append(atreader.port)
+    return atlist
+
+def get_first_at_terminal():
+    l = list_at_terminals()
+    if len(l) > 0:
+        return l.values()[0]
+    else:
+        return []
+
+def get_first_at_ports():
+    l = list_at_ports()
+    if len(l) > 0:
+        return l.values()[0]
+    else:
+        return []
+
+def test_at_terminals(findlist):
+    ''' Function that test the AT terminals given in the findlist and returns the list of terminal grouped by device  '''
+    atlist = {}
+    atterms = []
+    for interface in findlist:
+            atreader = ATReader(interface, 0.2)
+            atterms.append(atreader)
+            time.sleep(0.1)
+    for atreader in atterms:
+        print 'atreader('+atreader.port+').res = '+atreader.res
+        atreader.stop()
         if atreader.res <> None and ('OK' in atreader.res or 'AT' in atreader.res):
             tmpattc = ATTerminalConnection(atreader.port)
             device = MobileDevice(tmpattc)
             imei = device.get_imei()
+            tmpattc.stop()
             if not atlist.has_key(imei):
                 atlist[imei] = []
-            atlist[imei].append(atreader.port)
-            tmpattc.stop()
-        atreader.stop()
+            atlist[imei].append(ATTerminalConnection(atreader.port))
     return atlist
 
 class ATListener:
     def listen(self, event, source):
         raise NotImplementedError()
 
-class ATTerminalConnection(CommonThread):
+
+class ATReader(common.CommonThread):
+    ''' This class is a tester who explore AT ports
+    '''
+    def __init__(self, port, timeout):
+        common.CommonThread.__init__(self)
+        self.res = ''
+        self.port = port
+        self.timeout = timeout
+        self.start()
+
+    def execute(self):
+        try:
+            if self.res == '':
+                attc = ATTerminalConnection(self.port)
+                attc.open()
+                attc.set_timeout(self.timeout, True)
+                self.res = attc.send_command('AT')
+                attc.close()
+        except Exception, detail:
+            print ''
+            print detail
+            print ''
+
+class ATTerminalConnection(common.CommonThread):
     ''' Represents a terminal who process AT commands, the terminal can be:
             * a normal terminal (a terminal for common I/O commands)
             * or a feedback terminal (a terminal who emits status messages, events messages, info messages, etc. )
     '''
     def __init__(self, port = '/dev/ttyUSB0', atlistener = None):
-        CommonThread.__init__(self)
+        common.CommonThread.__init__(self)
         self.__port_name = get_os_port(port)
         self.__is_open = False
         self.__port = None
@@ -195,50 +214,53 @@ class ATTerminalConnection(CommonThread):
     def stop(self):
         if self.__atlistener <> None:
             self.__atlistener.stop()
-        CommonThread.stop(self)
+        common.CommonThread.stop(self)
 
     def read_buffer(self):
-        if (self.__port == None) or not self.is_open():
-            return
-        res = ''
-        a = time.time()
-        b = time.time()
-        while self.__port.inWaiting() or not self.__is_acknowledge_response(res):
-            buff = self.__port.readline()
-            buff = buff.replace('\r\n', '')
-            buff = buff.replace('\n', '')
-            buff = buff.replace('\r', '')
-            if not self.__is_status_response(buff):
-                if self.__is_acknowledge_response(buff):
-                    if len(res)==0:
-                        res = buff
-                    break
+        try:
+            if (self.__port == None) or not self.is_open():
+                return
+            res = ''
+            a = time.time()
+            b = time.time()
+            while self.__port.inWaiting() or not self.__is_acknowledge_response(res):
+                buff = self.__port.readline()
+                buff = buff.replace('\r\n', '')
+                buff = buff.replace('\n', '')
+                buff = buff.replace('\r', '')
+                if not self.__is_status_response(buff):
+                    if self.__is_acknowledge_response(buff):
+                        if len(res)==0:
+                            res = buff
+                        break
+                    else:
+                        if len(buff)>0:
+                            res = res + '\n' +buff
                 else:
-                    if len(buff)>0:
-                        res = res + '\n' +buff
-            else:
-                res = self.__port.readline()
-                res = res.replace('\r\n', '')
-                res = res.replace('\n', '')
-                res = res.replace('\r', '')
-                if self.__is_message_response(buff):
-                    while not self.__is_status_response(res):
+                    res = self.__port.readline()
+                    res = res.replace('\r\n', '')
+                    res = res.replace('\n', '')
+                    res = res.replace('\r', '')
+                    if self.__is_message_response(buff):
+                        while not self.__is_status_response(res):
+                            if len(res)>0:
+                                buff = buff + '\n' + res
+                            res = self.__port.readline()
+                            res = res.replace('\r\n', '')
+                            res = res.replace('\n', '')
+                            res = res.replace('\r', '')
+                    else:
                         if len(res)>0:
                             buff = buff + '\n' + res
-                        res = self.__port.readline()
-                        res = res.replace('\r\n', '')
-                        res = res.replace('\n', '')
-                        res = res.replace('\r', '')
+                    self.__process_status_response_(buff)
+                if (self.__timeout == None) or ( (b-a) < self.__timeout ):
+                    b = time.time()
+                    time.sleep(0.00001)
                 else:
-                    if len(res)>0:
-                        buff = buff + '\n' + res
-                self.__process_status_response_(buff)
-            if (self.__timeout == None) or ( (b-a) < self.__timeout ):
-                b = time.time()
-                time.sleep(0.00001)
-            else:
-                break
-        return res
+                    break
+            return res
+        except:
+            return
 
     def __process_status_response_(self, response):
         if (response.strip().startswith('^')):
@@ -281,6 +303,8 @@ class ATTerminalConnection(CommonThread):
         if (self.__port == None) or (not self.is_open()):
             return
         try:
+            if self.__atlistener <> None:
+                self.__atlistener.stop()
             self.__port.close()
             self.__is_open = False
         except:
@@ -317,16 +341,22 @@ class ATTerminalConnection(CommonThread):
     def set_atlistener(self, atlistener):
         self.__atlistener = atlistener
 
+    def is_configport(self):
+        return self.__is_feedback
+
     def __str__(self):
         return self.__port_name
 
     def __repr__(self):
         return str(self)
 
+    def __cmp__(self, other):
+        return cmp(str(self), str(other))
 
-class HuaweiATListener(ATListener, CommonThread):
+
+class HuaweiATListener(ATListener, common.CommonThread):
     def __init__(self, device):
-        CommonThread.__init__(self)
+        common.CommonThread.__init__(self)
         self.__started = False
         self.__device = device
         self.__mutex = threading.Lock()
@@ -458,9 +488,10 @@ class HuaweiATListener(ATListener, CommonThread):
 class MobileDevice(ATListener):
     ''' Represents a mobile device, this is the base class of a mobile phone '''
     def __init__(self, atport):
+        if type(atport) == type(''):
+            atport = ATTerminalConnection(atport)
         self._port = atport
-        atport.set_atlistener(HuaweiATListener(self))
-        self._port.open()
+        self._port.set_atlistener(HuaweiATListener(self))
         self.__manufacturer = ''
         self.__model = ''
         self.__imei = ''
@@ -474,7 +505,7 @@ class MobileDevice(ATListener):
         self._listeners['new_ussd'] = []
         self._listeners['dataflow_change'] = []
         self._listeners['connection_info'] = []
-        self._prepare()
+        self.power_on()
 
     def emit(self, event, data):
         if event in self._listeners.keys():
@@ -825,6 +856,7 @@ if __name__ == '__main__':
             print sms.get_message()
             sms.delete()
             print '-----------------------------------------'
+        term.stop()
         #for msg in l:
         #    msg.delete()
         #print mobilep.get_manufacturer()

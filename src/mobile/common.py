@@ -577,19 +577,28 @@ class PhoneBookEntry:
     def __hash(self):
         return hash(self.get_name())
 
+TCOUNTER = 0
 
 class CommonThread(threading.Thread):
     
     def __init__(self):
         threading.Thread.__init__(self)
+        global TCOUNTER
+        TCOUNTER = TCOUNTER + 1
+        self.setName(TCOUNTER)
+        #print 'creado: '+self.getName()
     
     def execute(self):
         raise NotImplementedError('CommonThread.execute() not implemented yet!')
     
     def run(self):
-        while self.__started:
+        while True:
             self.execute()
             time.sleep(0.1)
+            #print 'ejecutando:'+self.getName()
+            if not self.__started:
+                #print 'matando:'+self.getName()
+                break
 
     def start(self):
         try:
