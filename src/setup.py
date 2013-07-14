@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 #
 # Copyright 2011,2013 Luis Ariel Vega Soliz and contributors.
@@ -40,5 +41,5 @@ setup(name='python-mobile',
       license='GPL',
       py_modules=[],
       packages = find_packages(),
-      install_requires = ['python-serial']
+      install_requires = ['pyserial']
 )
